@@ -3,33 +3,46 @@ from typing import List
 from ninja import NinjaAPI, Schema
 from django.shortcuts import get_object_or_404
 from .models import Author, Book
+from ninja import FilterSchema, FilterLookup
+from typing import Annotated, Optional
+from ninja import Query
+from ninja import File, UploadedFile
 
 api = NinjaAPI()
 
-class AuthorIn(Schema):
-    first_name: str
-    last_name: str
-    patronymic: str
-    birthdate: date = None
-
+class BookIn(Schema):
+    title: str
+    description: str = None
+    year_of_publishing: date
+    number_of_pages: int
+    author_id: int
+    
 class AuthorOut(Schema):
     id: int
     first_name: str
     last_name: str
     patronymic: str
     birthdate: date = None
-
-class BookIn(Schema):
-    title: str
-    authors: List[int]
-    description: str = ""
-
+    
+class AuthorIn(Schema):
+    first_name: str
+    last_name: str
+    patronymic: str
+    birthdate: date
+    
 class BookOut(Schema):
     id: int
     title: str
-    description: str
-    authors: List[AuthorOut]
-
+    description: str = None
+    year_of_publishing: date
+    number_of_pages: int
+    image: str = None
+    author: AuthorOut
+    
+class BookFilterSchema(FilterSchema):
+    title: Annotated[Optional[str], FilterLookup("title__icontains")] = None
+    author: Annotated[Optional[str], FilterLookup(["author__first_name__icontains", "author__last_name__icontains", "author__patronymic__icontains"])] = None
+    
 @api.post("/authors")
 def create_author(request, payload: AuthorIn):
     author = Author.objects.create(**payload.dict())
@@ -42,7 +55,8 @@ def get_author(request, author_id: int):
 
 @api.get("/authors", response=List[AuthorOut])
 def list_authors(request):
-    return Author.objects.all()
+    qs = Author.objects.all()
+    return qs
 
 @api.put("/authors/{author_id}")
 def update_author(request, author_id: int, payload: AuthorIn):
@@ -59,34 +73,31 @@ def delete_author(request, author_id: int):
     return {"success": True}
 
 @api.post("/books")
-def create_book(request, payload: BookIn):
-    authors_ids = payload.authors
-    book = Book.objects.create(
-        title=payload.title,
-        description=payload.description
-    )
-    book.authors.set(authors_ids)
+def create_book(request, payload: BookIn, image: File[UploadedFile] = None):
+    data = payload.dict()
+    author_id = data.pop("author_id")
+    book = Book.objects.create(author_id=author_id, **data)
+    if image:
+        book.image.save(image.name, image)
+
     return {"id": book.id}
 
 @api.get("/books/{book_id}", response=BookOut)
 def get_book(request, book_id: int):
-    return get_object_or_404(Book, id=book_id)
-
+    book = get_object_or_404(Book, id=book_id)
+    return book
 
 @api.get("/books", response=List[BookOut])
 def list_books(request):
-    return Book.objects.prefetch_related("authors").all()
-
+    return Book.objects.all()
 
 @api.put("/books/{book_id}")
 def update_book(request, book_id: int, payload: BookIn):
     book = get_object_or_404(Book, id=book_id)
-    book.title = payload.title
-    book.description = payload.description
+    for attr, value in payload.dict().items():
+        setattr(book, attr, value)
     book.save()
-    book.authors.set(payload.authors)
     return {"success": True}
-
 
 @api.delete("/books/{book_id}")
 def delete_book(request, book_id: int):
