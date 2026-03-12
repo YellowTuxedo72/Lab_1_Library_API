@@ -16,6 +16,7 @@ class BookIn(Schema):
     year_of_publishing: date
     number_of_pages: int
     author_id: int
+    genre: str = None
     
 class AuthorOut(Schema):
     id: int
@@ -34,14 +35,20 @@ class BookOut(Schema):
     id: int
     title: str
     description: str = None
-    year_of_publishing: date
+    year_of_publishing: int
     number_of_pages: int
-    image: str = None
+    # image: str = None
     author: AuthorOut
+    genre: str = None
     
 class BookFilterSchema(FilterSchema):
     title: Annotated[Optional[str], FilterLookup("title__icontains")] = None
     author: Annotated[Optional[str], FilterLookup(["author__first_name__icontains", "author__last_name__icontains", "author__patronymic__icontains"])] = None
+    min_year: Optional[int] = None
+    max_year: Optional[int] = None
+    genre: Optional[List[str]] = None 
+    min_pages: Annotated[Optional[int], FilterLookup("number_of_pages__gte")] = None
+    max_pages: Annotated[Optional[int], FilterLookup("number_of_pages__lte")] = None
     
 @api.post("/authors")
 def create_author(request, payload: AuthorIn):
@@ -88,8 +95,19 @@ def get_book(request, book_id: int):
     return book
 
 @api.get("/books", response=List[BookOut])
-def list_books(request):
-    return Book.objects.all()
+def list_books(request, filters: BookFilterSchema = Query(...)):
+    
+    books = Book.objects.all()
+    books = filters.filter(books)
+    
+    if filters.min_year:    
+        books = books.filter(year_of_publishing__gte=filters.min_year)
+    if filters.max_year:
+        books = books.filter(year_of_publishing__gte=filters.max_year)
+    if filters.genre:
+        books = books.filter(genre__in=filters.genre)
+        
+    return books
 
 @api.put("/books/{book_id}")
 def update_book(request, book_id: int, payload: BookIn):
